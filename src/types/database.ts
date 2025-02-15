@@ -1,11 +1,16 @@
 import { CollectionDefinition as Collection } from "./collection";
-
+import { Firestore } from "firebase/firestore";
 export interface DatabaseConfig {
   type: "firebase" | "mongodb";
   credentials: {
     // Firebase config
     apiKey?: string;
+    appId?: string;
     projectId?: string;
+    authDomain?: string;
+    storageBucket?: string;
+    messagingSenderId?: string;
+    measurementId?: string;
     // MongoDB config
     uri?: string;
   };
@@ -14,9 +19,12 @@ export interface DatabaseConfig {
 export interface DatabaseService {
   connect(config: DatabaseConfig): Promise<void>;
   disconnect(): Promise<void>;
+  getDatabase(): Promise<Firestore>;
+  // Collection operations
+  getAllCollections(): Promise<Collection[]>;
   getCollection(collectionId: string): Promise<Collection>;
-  listCollections(): Promise<Collection[]>;
-  createCollection(collection: Omit<Collection, "id">): Promise<Collection>;
+  getCollections(collectionIds: string[]): Promise<Collection[]>;
+  createCollection(collection: Omit<Collection, "id" | "fid">, mockData?: any[]): Promise<Collection>;
   updateCollection(id: string, collection: Partial<Collection>): Promise<Collection>;
   deleteCollection(id: string): Promise<void>;
 
@@ -36,6 +44,8 @@ export interface DatabaseService {
   ): Promise<{ data: any[]; total: number; hasMore: boolean }>;
 
   batchCreateDocuments(collectionId: string, documents: any[]): Promise<any[]>;
+  batchDeleteDocuments(collectionId: string, documentIds: string[]): Promise<void>;
+  batchUpdateDocuments(collectionId: string, documents: { id: string; data: any }[]): Promise<any[]>;
 }
 
 export interface QueryParams {

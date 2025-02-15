@@ -1,11 +1,10 @@
-import { initializeApp, FirebaseApp } from "firebase/app";
+import { initializeApp, FirebaseApp, deleteApp } from "firebase/app";
 import {
   getFirestore,
   collection,
   doc,
   getDocs,
   getDoc,
-  addDoc,
   updateDoc,
   deleteDoc,
   query,
@@ -15,68 +14,380 @@ import {
   startAfter,
   Firestore,
   writeBatch,
+  setDoc,
 } from "firebase/firestore";
+import { getAuth, signInAnonymously, Auth } from "firebase/auth";
 import type { DatabaseService, DatabaseConfig, QueryParams } from "../types/database";
 import type { CollectionDefinition as Collection } from "../types/collection";
+
+const COLLECTIONS_PATH = "collections";
+
+function generateCollectionId(name: string): string {
+  const shortId = Math.random().toString(36).substring(2, 9);
+  return `${name.toLowerCase()}_${shortId}`;
+}
 
 export class FirebaseService implements DatabaseService {
   private app: FirebaseApp | null = null;
   private db: Firestore | null = null;
+  private auth: Auth | null = null;
+  private isConnecting: boolean = false;
+
+  //============================================================================
+  // Database Connection Methods
+  //============================================================================
+
+  async getDatabase(): Promise<Firestore> {
+    if (!this.db) throw new Error("Database not connected");
+    return this.db;
+  }
 
   async connect(config: DatabaseConfig): Promise<void> {
-    if (!config.credentials.apiKey || !config.credentials.projectId) {
-      throw new Error("Firebase credentials missing");
+    if (this.isConnecting) {
+      console.log("Connection already in progress, skipping duplicate attempt");
+      return;
     }
 
-    this.app = initializeApp({
-      apiKey: config.credentials.apiKey,
-      projectId: config.credentials.projectId,
-    });
-    this.db = getFirestore(this.app);
+    if (!config.credentials.projectId) {
+      throw new Error("Firebase project ID is required");
+    }
+
+    this.isConnecting = true;
+
+    try {
+      // Clean up existing connection if any
+      if (this.app) {
+        await this.disconnect();
+      }
+
+      console.log("Connecting to Firebase project:", {
+        projectId: config.credentials.projectId,
+        authDomain: config.credentials.authDomain,
+        authEnabled: Boolean(config.credentials.apiKey),
+      });
+
+      // Initialize Firebase with the full config
+      const firebaseConfig = {
+        apiKey: config.credentials.apiKey,
+        authDomain: config.credentials.authDomain,
+        projectId: config.credentials.projectId,
+        storageBucket: config.credentials.storageBucket,
+        messagingSenderId: config.credentials.messagingSenderId,
+        appId: config.credentials.appId,
+        measurementId: config.credentials.measurementId,
+      };
+
+      // Initialize app with unique name
+      const appName = `${config.credentials.projectId}-${Date.now()}`;
+      this.app = initializeApp(firebaseConfig, appName);
+
+      // Get Firestore instance
+      this.db = getFirestore(this.app);
+
+      // Try authentication but don't fail if it's not configured
+      if (config.credentials.apiKey) {
+        this.auth = getAuth(this.app);
+        try {
+          await signInAnonymously(this.auth);
+          console.log(`✅ Connected with authentication: ${config.credentials.projectId}`);
+        } catch (authError) {
+          console.warn(
+            `⚠️ Authentication failed, continuing in public mode: ${
+              authError instanceof Error ? authError.message : "Unknown error"
+            }`
+          );
+          // Continue without authentication
+        }
+      }
+
+      console.log(`📦 Connected to Firebase project: ${config.credentials.projectId}`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      console.error("❌ Firebase initialization error:", error);
+      throw new Error(`Failed to initialize Firebase: ${errorMessage}`);
+    } finally {
+      this.isConnecting = false;
+    }
   }
 
   async disconnect(): Promise<void> {
-    // Firebase handles connection management automatically
+    // Sign out if authenticated
+    if (this.auth) {
+      try {
+        await this.auth.signOut();
+      } catch (error) {
+        console.warn("Error signing out:", error);
+      }
+    }
+
+    // Delete the Firebase app instance
+    if (this.app) {
+      try {
+        await deleteApp(this.app);
+      } catch (error) {
+        console.warn("Error deleting Firebase app:", error);
+      }
+    }
+
+    this.app = null;
+    this.db = null;
+    this.auth = null;
+  }
+
+  //============================================================================
+  // Collection Definition Methods
+  //============================================================================
+
+  async getAllCollections(): Promise<Collection[]> {
+    if (!this.db) throw new Error("Database not connected");
+    const snapshot = await getDocs(collection(this.db, COLLECTIONS_PATH));
+    return snapshot.docs.map(
+      (doc) =>
+        ({
+          id: doc.data().id || doc.id,
+          fid: doc.id,
+          ...doc.data(),
+        } as Collection)
+    );
+  }
+
+  async getCollections(collectionIds: string[]): Promise<Collection[]> {
+    if (!this.db) throw new Error("Database not connected");
+    const collectionsRef = collection(this.db, COLLECTIONS_PATH);
+    const q = query(collectionsRef, where("name", "in", collectionIds));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(
+      (doc) =>
+        ({
+          id: doc.data().id || doc.id,
+          fid: doc.id,
+          ...doc.data(),
+        } as Collection)
+    );
   }
 
   async getCollection(collectionId: string): Promise<Collection> {
     if (!this.db) throw new Error("Database not connected");
-    const docRef = doc(this.db, "collections", collectionId);
+    const docRef = doc(this.db, COLLECTIONS_PATH, collectionId);
     const docSnap = await getDoc(docRef);
-    return docSnap.data() as Collection;
+
+    if (!docSnap.exists()) {
+      throw new Error(`Collection ${collectionId} not found`);
+    }
+
+    return {
+      id: docSnap.data().id || docSnap.id,
+      fid: docSnap.id,
+      ...docSnap.data(),
+    } as Collection;
   }
 
-  async listCollections(): Promise<Collection[]> {
+  async createCollection(collectionData: Omit<Collection, "id" | "fid">, mockData?: any[]): Promise<Collection> {
     if (!this.db) throw new Error("Database not connected");
-    const snapshot = await getDocs(collection(this.db, "collections"));
-    return snapshot.docs.map((doc) => doc.data() as Collection);
-  }
 
-  async createCollection(collectionData: Omit<Collection, "id">): Promise<Collection> {
-    if (!this.db) throw new Error("Database not connected");
-    const docRef = await addDoc(collection(this.db, "collections"), collectionData);
-    return { id: docRef.id, ...collectionData };
+    try {
+      // Normalize the collection name
+      const normalizedName = collectionData.name.toLowerCase().trim();
+
+      // First check if collection with this name already exists
+      const existingQuery = query(collection(this.db, COLLECTIONS_PATH), where("name", "==", normalizedName));
+      const existing = await getDocs(existingQuery);
+
+      if (!existing.empty) {
+        const existingDoc = existing.docs[0];
+        const existingData = existingDoc.data();
+
+        // Return the existing collection with both id and fid
+        return {
+          ...existingData,
+          id: existingData.id || existingDoc.id,
+          fid: existingDoc.id,
+          name: normalizedName,
+        } as Collection;
+      }
+
+      // Only create a new collection if one doesn't exist
+      const timestamp = new Date();
+      const generatedId = generateCollectionId(normalizedName);
+      const collectionRef = doc(collection(this.db, COLLECTIONS_PATH));
+
+      const newCollection = {
+        ...collectionData,
+        id: generatedId,
+        fid: collectionRef.id,
+        name: normalizedName,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+
+      await setDoc(collectionRef, newCollection);
+
+      // Handle mock data if provided
+      if (mockData && mockData.length > 0) {
+        const dataCollectionRef = collection(this.db, generatedId);
+        const batch = writeBatch(this.db);
+
+        mockData.forEach((item) => {
+          const docRef = doc(dataCollectionRef);
+          batch.set(docRef, { ...item, createdAt: timestamp, updatedAt: timestamp });
+        });
+
+        await batch.commit();
+      }
+
+      return newCollection;
+    } catch (error) {
+      console.error("Error in createCollection:", error);
+      throw error;
+    }
   }
 
   async updateCollection(id: string, collection: Partial<Collection>): Promise<Collection> {
     if (!this.db) throw new Error("Database not connected");
-    const docRef = doc(this.db, "collections", id);
-    await updateDoc(docRef, collection);
+    const docRef = doc(this.db, COLLECTIONS_PATH, id);
+    const updateData = { ...collection, updatedAt: new Date() };
+    await updateDoc(docRef, updateData);
     const updated = await getDoc(docRef);
-    return updated.data() as Collection;
+    return { id: updated.id, ...updated.data() } as Collection;
   }
 
-  async deleteCollection(id: string): Promise<void> {
+  async deleteCollection(collectionId: string): Promise<void> {
     if (!this.db) throw new Error("Database not connected");
-    await deleteDoc(doc(this.db, "collections", id));
+
+    try {
+      // Get collection definition from 'collections'
+      const collectionRef = doc(this.db, COLLECTIONS_PATH, collectionId);
+      const collectionDoc = await getDoc(collectionRef);
+
+      if (!collectionDoc.exists()) {
+        throw new Error(`Collection ${collectionId} not found`);
+      }
+
+      const collectionData = collectionDoc.data();
+      const batch = writeBatch(this.db);
+
+      // Delete all documents in the collection using the collection's generated ID
+      const dataSnapshot = await getDocs(collection(this.db, collectionData.id));
+
+      if (!dataSnapshot.empty) {
+        dataSnapshot.docs.forEach((doc) => {
+          batch.delete(doc.ref);
+        });
+      }
+
+      // Delete the collection definition
+      batch.delete(collectionRef);
+
+      await batch.commit();
+    } catch (error) {
+      console.error("Error in deleteCollection:", error);
+      throw error;
+    }
   }
+
+  //============================================================================
+  // Single Document Operations
+  //============================================================================
 
   async getDocument(collectionId: string, documentId: string): Promise<any> {
     if (!this.db) throw new Error("Database not connected");
     const docRef = doc(this.db, collectionId, documentId);
     const docSnap = await getDoc(docRef);
-    return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null;
+    if (!docSnap.exists()) return null;
+    return { id: docSnap.id, ...docSnap.data() };
   }
+
+  async createDocument(collectionId: string, data: any): Promise<any> {
+    if (!this.db) throw new Error("Database not connected");
+    const docRef = doc(collection(this.db, collectionId));
+    const timestamp = new Date();
+    const documentData = {
+      ...data,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    await setDoc(docRef, documentData);
+    return { id: docRef.id, ...documentData };
+  }
+
+  async updateDocument(collectionId: string, documentId: string, data: any): Promise<any> {
+    if (!this.db) throw new Error("Database not connected");
+    const docRef = doc(this.db, collectionId, documentId);
+    const updateData = {
+      ...data,
+      updatedAt: new Date(),
+    };
+    await updateDoc(docRef, updateData);
+    const updated = await getDoc(docRef);
+    return { id: updated.id, ...updated.data() };
+  }
+
+  async deleteDocument(collectionId: string, documentId: string): Promise<void> {
+    if (!this.db) throw new Error("Database not connected");
+    await deleteDoc(doc(this.db, collectionId, documentId));
+  }
+
+  //============================================================================
+  // Batch Document Operations
+  //============================================================================
+
+  async batchCreateDocuments(collectionId: string, documents: any[]): Promise<any[]> {
+    if (!this.db) throw new Error("Database not connected");
+    const batch = writeBatch(this.db);
+    const timestamp = new Date();
+    const results: any[] = [];
+
+    for (const data of documents) {
+      const docRef = doc(collection(this.db, collectionId));
+      const documentData = {
+        ...data,
+        id: docRef.id,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      batch.set(docRef, documentData);
+      results.push(documentData);
+    }
+
+    await batch.commit();
+    return results;
+  }
+
+  async batchUpdateDocuments(collectionId: string, documents: { id: string; data: any }[]): Promise<any[]> {
+    if (!this.db) throw new Error("Database not connected");
+    const batch = writeBatch(this.db);
+    const timestamp = new Date();
+    const results: any[] = [];
+
+    for (const { id, data } of documents) {
+      const docRef = doc(this.db, collectionId, id);
+      const updateData = {
+        ...data,
+        updatedAt: timestamp,
+      };
+      batch.update(docRef, updateData);
+      results.push({ id, ...updateData });
+    }
+
+    await batch.commit();
+    return results;
+  }
+
+  async batchDeleteDocuments(collectionId: string, documentIds: string[]): Promise<void> {
+    if (!this.db) throw new Error("Database not connected");
+    const batch = writeBatch(this.db);
+
+    documentIds.forEach((docId) => {
+      const docRef = doc(this.db!, collectionId, docId);
+      batch.delete(docRef);
+    });
+
+    await batch.commit();
+  }
+
+  //============================================================================
+  // Query and Search Operations
+  //============================================================================
 
   async queryDocuments(
     collectionId: string,
@@ -142,7 +453,6 @@ export class FirebaseService implements DatabaseService {
     };
   }
 
-  // Search documents with text search and pagination
   async searchDocuments(
     collectionId: string,
     searchText: string,
@@ -178,56 +488,5 @@ export class FirebaseService implements DatabaseService {
       total,
       hasMore: start + pageSize < total,
     };
-  }
-
-  async createDocument(collectionId: string, data: any): Promise<any> {
-    if (!this.db) throw new Error("Database not connected");
-    const timestamp = new Date();
-    const docRef = await addDoc(collection(this.db, collectionId), {
-      ...data,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    });
-    return { id: docRef.id, ...data, createdAt: timestamp, updatedAt: timestamp };
-  }
-
-  async updateDocument(collectionId: string, documentId: string, data: any): Promise<any> {
-    if (!this.db) throw new Error("Database not connected");
-    const docRef = doc(this.db, collectionId, documentId);
-    const timestamp = new Date();
-    const updateData = {
-      ...data,
-      updatedAt: timestamp,
-    };
-    await updateDoc(docRef, updateData);
-    const updated = await getDoc(docRef);
-    return { id: updated.id, ...updated.data() };
-  }
-
-  async deleteDocument(collectionId: string, documentId: string): Promise<void> {
-    if (!this.db) throw new Error("Database not connected");
-    await deleteDoc(doc(this.db, collectionId, documentId));
-  }
-
-  // Batch operations
-  async batchCreateDocuments(collectionId: string, documents: any[]): Promise<any[]> {
-    if (!this.db) throw new Error("Database not connected");
-    const batch = writeBatch(this.db);
-    const timestamp = new Date();
-    const results: any[] = [];
-
-    for (const data of documents) {
-      const docRef = doc(collection(this.db, collectionId));
-      const docData = {
-        ...data,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      };
-      batch.set(docRef, docData);
-      results.push({ id: docRef.id, ...docData });
-    }
-
-    await batch.commit();
-    return results;
   }
 }

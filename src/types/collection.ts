@@ -3,6 +3,7 @@ import { FieldType, FieldTypeToSettings, ValidationRules } from "@cms/dynamic-fo
 // 1. Collection/Table Definitions Schema
 export interface CollectionDefinition {
   id: string;
+  fid?: string;
   name: string;
   slug: string;
   description?: string;
@@ -17,6 +18,39 @@ export interface CollectionDefinition {
       afterCreate?: string;
       beforeUpdate?: string;
       afterUpdate?: string;
+      beforeDelete?: string;
+      afterDelete?: string;
+      beforeRestore?: string;
+      afterRestore?: string;
+    };
+    permissions?: {
+      create?: string[]; // Role IDs or user IDs that can create
+      read?: string[]; // Role IDs or user IDs that can read
+      update?: string[]; // Role IDs or user IDs that can update
+      delete?: string[]; // Role IDs or user IDs that can delete
+      admin?: string[]; // Role IDs or user IDs with full access
+    };
+    audit?: {
+      enabled: boolean; // Track all changes
+      retention?: number; // Days to keep audit logs
+      detailed?: boolean; // Include old/new values in logs
+    };
+    cache?: {
+      enabled: boolean; // Enable caching for this collection
+      ttl?: number; // Time to live in seconds
+      strategy?: "memory" | "redis" | "custom";
+    };
+    api?: {
+      enabled: boolean; // Expose REST API endpoints
+      methods?: ("GET" | "POST" | "PUT" | "DELETE" | "PATCH")[];
+      rateLimit?: {
+        requests: number; // Number of requests
+        period: number; // Time period in seconds
+      };
+    };
+    validation?: {
+      customValidators?: string[]; // Custom validation function names
+      skipValidation?: boolean; // Skip validation for trusted operations
     };
   };
   indexes?: Index[];
@@ -27,7 +61,7 @@ export interface CollectionDefinition {
 export interface Field {
   name: string;
   type: FieldType;
-  settings: FieldTypeToSettings[FieldType];
+  settings: FieldTypeToSettings[keyof FieldTypeToSettings];
   validation?: {
     required?: boolean;
     unique?: boolean;
