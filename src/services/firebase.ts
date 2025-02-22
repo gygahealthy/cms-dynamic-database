@@ -229,7 +229,7 @@ export class FirebaseService implements DatabaseService {
 
         mockData.forEach((item) => {
           const docRef = doc(dataCollectionRef);
-          batch.set(docRef, { ...item, createdAt: timestamp, updatedAt: timestamp });
+          batch.set(docRef, { ...item, fid: docRef.id, createdAt: timestamp, updatedAt: timestamp });
         });
 
         await batch.commit();
@@ -294,7 +294,7 @@ export class FirebaseService implements DatabaseService {
     const docRef = doc(this.db, collectionId, documentId);
     const docSnap = await getDoc(docRef);
     if (!docSnap.exists()) return null;
-    return { id: docSnap.id, ...docSnap.data() };
+    return docSnap.data();
   }
 
   async createDocument(collectionId: string, data: any): Promise<any> {
@@ -303,11 +303,12 @@ export class FirebaseService implements DatabaseService {
     const timestamp = new Date();
     const documentData = {
       ...data,
+      fid: docRef.id,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
     await setDoc(docRef, documentData);
-    return { id: docRef.id, ...documentData };
+    return { fid: docRef.id, ...documentData };
   }
 
   async updateDocument(collectionId: string, documentId: string, data: any): Promise<any> {
@@ -319,7 +320,7 @@ export class FirebaseService implements DatabaseService {
     };
     await updateDoc(docRef, updateData);
     const updated = await getDoc(docRef);
-    return { id: updated.id, ...updated.data() };
+    return updated.data();
   }
 
   async deleteDocument(collectionId: string, documentId: string): Promise<void> {
@@ -341,7 +342,7 @@ export class FirebaseService implements DatabaseService {
       const docRef = doc(collection(this.db, collectionId));
       const documentData = {
         ...data,
-        id: docRef.id,
+        fid: docRef.id,
         createdAt: timestamp,
         updatedAt: timestamp,
       };
@@ -441,10 +442,7 @@ export class FirebaseService implements DatabaseService {
     }
 
     const snapshot = await getDocs(queryRef);
-    const data = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const data = snapshot.docs.map((doc) => doc.data());
 
     return {
       data,
@@ -481,10 +479,7 @@ export class FirebaseService implements DatabaseService {
     const paginatedDocs = uniqueDocs.slice(start, start + pageSize);
 
     return {
-      data: paginatedDocs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })),
+      data: paginatedDocs.map((doc) => doc.data()),
       total,
       hasMore: start + pageSize < total,
     };

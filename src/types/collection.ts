@@ -80,7 +80,7 @@ export interface Index {
 // 2. Collection Data Schema
 // Stored in: data/{collectionSlug}/{documentId}
 export interface CollectionData {
-  id: string;
+  fid: string;
   [key: string]: any; // Dynamic fields based on collection definition
   _metadata: {
     version?: number;
