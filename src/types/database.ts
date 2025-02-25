@@ -1,5 +1,6 @@
 import { CollectionDefinition as Collection } from "./collection";
 import { Firestore } from "firebase/firestore";
+
 export interface DatabaseConfig {
   type: "firebase" | "mongodb";
   credentials: {
@@ -11,6 +12,7 @@ export interface DatabaseConfig {
     storageBucket?: string;
     messagingSenderId?: string;
     measurementId?: string;
+    databaseURL?: string;
     // MongoDB config
     uri?: string;
   };

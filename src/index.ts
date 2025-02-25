@@ -1,14 +1,15 @@
 import { createDatabaseService } from "./services";
+import { DatabaseConfig, DatabaseService, FirebaseDatabaseService } from "./types";
 
-import { DatabaseService } from "./types/database";
-
-import { DatabaseConfig } from "./types/database";
-
+export * from "./types";
 export { createDatabaseService } from "./services";
-export type { DatabaseConfig, DatabaseService, QueryParams } from "./types/database";
-export type { CollectionDefinition as Collection, Field, Index, CollectionData } from "./types/collection";
 
 // Factory function to create database instance
 export function createDatabase(config: DatabaseConfig): DatabaseService {
+  return createDatabaseService(config);
+}
+
+// Factory function to create firebase database instance
+export function createFirebaseDatabase(config: DatabaseConfig): FirebaseDatabaseService {
   return createDatabaseService(config);
 }

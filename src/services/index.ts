@@ -1,5 +1,5 @@
 import { DatabaseConfig } from "../types/database";
-import { FirebaseService } from "./firebase";
+import { FirebaseService } from "./firebase.service";
 
 export function createDatabaseService(config: DatabaseConfig) {
   if (config.type !== "firebase") {

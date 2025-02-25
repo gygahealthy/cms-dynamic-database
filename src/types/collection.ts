@@ -1,4 +1,4 @@
-import { FieldType, FieldTypeToSettings, ValidationRules } from "@cms/dynamic-forms";
+import { FieldType, FieldTypeToSettings } from "@cms/dynamic-forms";
 
 // 1. Collection/Table Definitions Schema
 export interface CollectionDefinition {
@@ -62,11 +62,6 @@ export interface Field {
   name: string;
   type: FieldType;
   settings: FieldTypeToSettings[keyof FieldTypeToSettings];
-  validation?: {
-    required?: boolean;
-    unique?: boolean;
-    rules?: ValidationRules[];
-  };
   defaultValue?: any;
   isSearchable?: boolean;
   isSortable?: boolean;
